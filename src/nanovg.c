@@ -289,9 +289,60 @@ static NVGstate* nvg__getState(NVGcontext* ctx)
 	return &ctx->states[ctx->nstates-1];
 }
 
-NVGcontext* nvgCreateInternal(NVGparams* params)
+void nvgClearFontsInternal(NVGcontext *ctx)
+{
+	int i;
+	if (ctx->fs)
+	{
+		fonsDeleteInternal(ctx->fs);
+		ctx->fs = NULL;
+	}
+
+	for (i = 0; i < NVG_MAX_FONTIMAGES; i++) {
+		if (ctx->fontImages[i] != 0) {
+			nvgDeleteImage(ctx, ctx->fontImages[i]);
+			ctx->fontImages[i] = 0;
+		}
+	}
+
+}
+int nvgInitFontsInternal(NVGcontext *ctx)
 {
 	FONSparams fontParams;
+	// Init font rendering
+	memset(&fontParams, 0, sizeof(fontParams));
+	fontParams.width = NVG_INIT_FONTIMAGE_SIZE;
+	fontParams.height = NVG_INIT_FONTIMAGE_SIZE;
+	fontParams.flags = FONS_ZERO_TOPLEFT;
+	fontParams.renderCreate = NULL;
+	fontParams.renderUpdate = NULL;
+	fontParams.renderDraw = NULL;
+	fontParams.renderDelete = NULL;
+	fontParams.userPtr = NULL;
+	ctx->fs = fonsCreateInternal(&fontParams);
+	if (ctx->fs == NULL) goto error;
+
+	// Create font texture
+	ctx->fontImages[0] = ctx->params.renderCreateTexture(ctx->params.userPtr, NVG_TEXTURE_ALPHA, fontParams.width, fontParams.height, 0, NULL);
+	if (ctx->fontImages[0] == 0) goto error;
+	ctx->fontImageIdx = 0;
+
+	return 1;
+
+error:
+	return 0;
+
+}
+
+int nvgClearFonts(NVGcontext *ctx)
+{
+    nvgClearFontsInternal(ctx);
+    return nvgInitFontsInternal(ctx);
+}
+
+
+NVGcontext* nvgCreateInternal(NVGparams* params)
+{
 	NVGcontext* ctx = (NVGcontext*)malloc(sizeof(NVGcontext));
 	int i;
 	if (ctx == NULL) goto error;
@@ -316,23 +367,7 @@ NVGcontext* nvgCreateInternal(NVGparams* params)
 
 	if (ctx->params.renderCreate(ctx->params.userPtr) == 0) goto error;
 
-	// Init font rendering
-	memset(&fontParams, 0, sizeof(fontParams));
-	fontParams.width = NVG_INIT_FONTIMAGE_SIZE;
-	fontParams.height = NVG_INIT_FONTIMAGE_SIZE;
-	fontParams.flags = FONS_ZERO_TOPLEFT;
-	fontParams.renderCreate = NULL;
-	fontParams.renderUpdate = NULL;
-	fontParams.renderDraw = NULL;
-	fontParams.renderDelete = NULL;
-	fontParams.userPtr = NULL;
-	ctx->fs = fonsCreateInternal(&fontParams);
-	if (ctx->fs == NULL) goto error;
-
-	// Create font texture
-	ctx->fontImages[0] = ctx->params.renderCreateTexture(ctx->params.userPtr, NVG_TEXTURE_ALPHA, fontParams.width, fontParams.height, 0, NULL);
-	if (ctx->fontImages[0] == 0) goto error;
-	ctx->fontImageIdx = 0;
+	if(!nvgInitFontsInternal(ctx)) goto error;
 
 	return ctx;
 
@@ -348,20 +383,11 @@ NVGparams* nvgInternalParams(NVGcontext* ctx)
 
 void nvgDeleteInternal(NVGcontext* ctx)
 {
-	int i;
 	if (ctx == NULL) return;
 	if (ctx->commands != NULL) free(ctx->commands);
 	if (ctx->cache != NULL) nvg__deletePathCache(ctx->cache);
 
-	if (ctx->fs)
-		fonsDeleteInternal(ctx->fs);
-
-	for (i = 0; i < NVG_MAX_FONTIMAGES; i++) {
-		if (ctx->fontImages[i] != 0) {
-			nvgDeleteImage(ctx, ctx->fontImages[i]);
-			ctx->fontImages[i] = 0;
-		}
-	}
+	nvgClearFontsInternal(ctx);
 
 	if (ctx->params.renderDelete != NULL)
 		ctx->params.renderDelete(ctx->params.userPtr);
